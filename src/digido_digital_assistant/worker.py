@@ -19,7 +19,9 @@ def _summary_due(local_now: datetime, summary_time) -> bool:
     return local_now.time() >= summary_time
 
 
-def run_summary_for_user(user_id: str, summary_date: date, send_notifications: bool = True) -> None:
+def run_summary_for_user(
+    user_id: str, summary_date: date, send_notifications: bool = True
+) -> None:
     user = fetch_user_prefs_by_id(user_id)
     if not user:
         raise RuntimeError(f"User prefs not found for {user_id}")

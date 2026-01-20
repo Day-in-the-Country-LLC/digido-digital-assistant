@@ -17,7 +17,9 @@ def get_twilio_client() -> Client | None:
     return Client(settings.twilio_account_sid, settings.twilio_auth_token)
 
 
-def send_sms(to_number: str, body: str, media_urls: Iterable[str] | None = None) -> str | None:
+def send_sms(
+    to_number: str, body: str, media_urls: Iterable[str] | None = None
+) -> str | None:
     client = get_twilio_client()
     if not client:
         return None

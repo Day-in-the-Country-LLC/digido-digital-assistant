@@ -45,3 +45,25 @@ create table if not exists assistant_notification_outbox (
   sent_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+-- Finance statement records ingested via CSV uploads
+create table if not exists assistant_finance_statements (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  ingest_id uuid not null,
+  transaction_date date not null,
+  description text not null,
+  amount numeric(12, 2) not null,
+  reference_id text,
+  category text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists assistant_finance_statements_user_idx
+  on assistant_finance_statements (user_id);
+
+create index if not exists assistant_finance_statements_ingest_idx
+  on assistant_finance_statements (ingest_id);
+
+create index if not exists assistant_finance_statements_date_idx
+  on assistant_finance_statements (user_id, transaction_date);
