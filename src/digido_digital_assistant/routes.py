@@ -4,10 +4,6 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from digido_digital_assistant.config import settings
-from digido_digital_assistant.repositories.connected_accounts import (
-    fetch_connected_account,
-    upsert_connected_account,
-)
 from digido_digital_assistant.repositories.summaries import (
     fetch_latest_summary,
     insert_daily_summary,
@@ -16,14 +12,9 @@ from digido_digital_assistant.repositories.user_prefs import (
     fetch_user_prefs_by_id,
     update_summary_last_sent_on,
 )
-from digido_digital_assistant.services.google_oauth import (
-    exchange_code,
-    extract_account_info,
-)
 from digido_digital_assistant.services.finance.ingest_orchestrator import ingest_csv
 from digido_digital_assistant.services.notifications import send_sms
 from digido_digital_assistant.services.summaries import generate_daily_summary
-from digido_digital_assistant.services.supabase_auth import get_user_id_from_token
 from digido_digital_assistant.utils.time import to_local_time
 from digido_digital_assistant.worker import run_due_summaries
 
@@ -34,14 +25,6 @@ class SummaryRequest(BaseModel):
     user_id: str
     summary_date: date | None = None
     send_notifications: bool = False
-
-
-class GoogleOAuthExchangeRequest(BaseModel):
-    user_id: str | None = None
-    code: str
-    code_verifier: str
-    redirect_uri: str
-    client_id: str
 
 
 class FinanceIngestRequest(BaseModel):
@@ -72,86 +55,11 @@ def _require_job_token(provided_token: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid job token")
 
 
-def _extract_bearer_token(authorization: str | None) -> str:
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid Authorization header")
-    return authorization.split(" ", 1)[1]
-
-
-def _validate_client_id(client_id: str) -> None:
-    allowed = settings.google_oauth_client_ids
-    if not allowed:
-        return
-    if client_id not in allowed:
-        raise HTTPException(status_code=403, detail="Client ID not allowed")
-
-
 @router.post("/v1/jobs/daily-summaries")
 def run_daily_summary_job(x_job_token: str | None = Header(default=None)) -> dict:
     _require_job_token(x_job_token)
     run_due_summaries()
     return {"status": "ok"}
-
-
-@router.post("/v1/oauth/google/exchange")
-def exchange_google_oauth(
-    request: GoogleOAuthExchangeRequest,
-    authorization: str | None = Header(default=None),
-) -> dict:
-    access_token = _extract_bearer_token(authorization)
-    try:
-        user_id = get_user_id_from_token(access_token)
-    except Exception as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-
-    if request.user_id and request.user_id != user_id:
-        raise HTTPException(status_code=403, detail="User mismatch")
-
-    _validate_client_id(request.client_id)
-
-    try:
-        token_response = exchange_code(
-            code=request.code,
-            code_verifier=request.code_verifier,
-            redirect_uri=request.redirect_uri,
-            client_id=request.client_id,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    account_info = extract_account_info(token_response)
-    if not account_info or not account_info.provider_account_id:
-        raise HTTPException(status_code=400, detail="Unable to resolve Google account")
-
-    existing = fetch_connected_account(user_id, account_info.provider_account_id)
-    refresh_token = token_response.refresh_token or (
-        existing.get("refresh_token") if existing else None
-    )
-    if not refresh_token:
-        raise HTTPException(
-            status_code=400, detail="Missing refresh token; re-consent required"
-        )
-
-    payload = {
-        "user_id": user_id,
-        "provider_account_id": account_info.provider_account_id,
-        "email": account_info.email,
-        "display_name": account_info.display_name,
-        "access_token": token_response.access_token,
-        "refresh_token": refresh_token,
-        "token_expires_at": token_response.expires_at.isoformat()
-        if token_response.expires_at
-        else None,
-        "scopes": token_response.scopes or [],
-    }
-    stored = upsert_connected_account(payload)
-    return {
-        "provider_account_id": stored.get("provider_account_id"),
-        "email": stored.get("email"),
-        "display_name": stored.get("display_name"),
-    }
 
 
 @router.post("/v1/summaries/run")
